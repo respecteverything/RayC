@@ -2,7 +2,7 @@ import sys
 import redis
 import os
 import ray
-import Worker
+from Worker import Worker
 import time
 
 class Driver(object):
@@ -15,17 +15,15 @@ class Driver(object):
         self.model_helper = None
         self.workers = []
         self.workers_ip = []
-        self.redis = None
+        self.redis = redis.Redis(host=self.ip, port=self.port, db=0)
 
     def __init__(self,file):
         file = open(file, 'r')
 
 
     def init_redis(self):
-        r = redis.Redis(host=self.ip, port=self.port, db=0)
         group_name = "consumer"
-        r.xgroup_create("source", group_name, id=0)
-        self.redis = r
+        self.redis.xgroup_create("source", group_name, id=0, mkstream=True)
 
     def load_model(self):
         if self.model_type == "tf":
@@ -36,27 +34,28 @@ class Driver(object):
                     if ".json" in file:
                         json_path = maindir + file
 
-            file_1= open(model_path, 'rb')
+            file_1 = open(model_path, 'rb')
             import json
             with open(json_path,'r') as file_2:
                 self.model_helper = json.load(file_2)
             self.model = file_1.read()
 
-    def ray_info(self):
-        if ray.is_initialized():
-            ray.cluster_resource()
-        else:
-            # throw error
+
+    # def ray_info(self):
+    #     if ray.is_initialized():
+    #         ray.cluster_resource()
+    #     else:
+    #         # throw error
 
     def add_worker(self):
         new_worker = Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper)
         self.workers.append(new_worker)
-        self.workers_ip.append(new_worker.ip())
+        self.workers_ip.append(new_worker.ip.remote())
 
     def add_workers(self, number):
         new_workers = [Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper) for _ in range(number)]
         self.workers.extend(new_workers)
-        self.workers_ip.extend([new_worker.ip() for new_worker in new_workers])
+        self.workers_ip.extend([new_worker.ip.remote() for new_worker in new_workers])
 
     def delete_worker(self, ip):
         index = self.workers_ip.index(ip)
@@ -67,7 +66,7 @@ class Driver(object):
             self.workers.remove(self.workers[index])
             self.workers_ip.remove(ip)
 
-    def delete_workers(self,ips):
+    def delete_workers(self, ips):
         for ip in ips:
             self.delete_worker(ip)
 
@@ -81,5 +80,5 @@ class Driver(object):
         else:
             avg = l/len(self.workers)+1
             for worker in self.workers:
-                worker.predict(avg)
+                worker.predict.remote(avg)
 

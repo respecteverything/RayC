@@ -26,7 +26,6 @@ class Worker(object):
             time_stamp.append(info[0][1][i][0].decode())
         return img, time_stamp
 
-    @timing
     def load_model_tf(self):
         import tensorflow as tf
         sess = tf.Session()
@@ -38,7 +37,6 @@ class Worker(object):
         # try...catch need to add
         self.sess = sess
 
-    @timing
     def predict(self, count=1):
         if self.model_type == 'tf':
             input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])

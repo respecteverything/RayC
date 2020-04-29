@@ -3,6 +3,7 @@ import time
 import redis
 import cv2
 
+
 def timing(func):
     def wrapper(*args):
         begin = int(round(time.time() * 1000))
