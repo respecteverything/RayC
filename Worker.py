@@ -1,7 +1,9 @@
 import ray
 import redis
 import numpy as np
-
+import time
+import PreProcessing
+import PostProcessing
 
 @ray.remote(resources={"worker": 1})
 class Worker(object):
@@ -11,20 +13,20 @@ class Worker(object):
         self.model_type = model_type
         self.sess = None
         self.helper = model_helper
-        self.temp = None
 
     def ip(self):
-        # print(ray.services.get_node_ip_address())
-        # r = redis.Redis(connection_pool=pool)
         return ray.services.get_node_ip_address()
 
-    def handle(self):
-        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '>'}, count=1)
-        img = np.frombuffer(info[0][1][0][1][b'img'], dtype=np.uint8)
-        temp = img.resize(1, 224, 224, 3)
-        self.temp = info[0][1][0][0].decode()
-        return img
+    def get_content(self, count=1):
+        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '>'}, count=count)
+        img = []
+        time_stamp = []
+        for i in count:
+            img.append(np.frombuffer(info[0][1][i][1][b'img'], dtype=np.uint8))
+            time_stamp.append(info[0][1][i][0].decode())
+        return img, time_stamp
 
+    @timing
     def load_model_tf(self):
         import tensorflow as tf
         sess = tf.Session()
@@ -36,11 +38,14 @@ class Worker(object):
         # try...catch need to add
         self.sess = sess
 
-    def predict(self):
+    @timing
+    def predict(self, count=1):
         if self.model_type == 'tf':
             input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])
             op = self.sess.graph.get_tensor_by_name(self.helper['output_names'][0])
-            res = self.sess.run(op, feed_dict={input: self.handle()})
-            self.r.lpush("result",np.argmax(res))
-            self.r.xack("source","consumer",self.temp)
-
+            img, timestamp = self.get_content(count)
+            res = []
+            for i in len(img):
+                res.append(self.sess.run(op, feed_dict={input: img[i]}))
+                self.r.lpush("result", np.argmax(res))
+                self.r.xack("source", "consumer", timestamp[i])

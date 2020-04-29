@@ -3,6 +3,7 @@ import redis
 import os
 import ray
 import Worker
+import time
 
 class Driver(object):
     def __init__(self, ip, port, model_type, model_path):
@@ -12,6 +13,9 @@ class Driver(object):
         self.model_path = model_path
         self.model = None
         self.model_helper = None
+        self.workers = []
+        self.workers_ip = []
+        self.redis = None
 
     def __init__(self,file):
         file = open(file, 'r')
@@ -21,6 +25,7 @@ class Driver(object):
         r = redis.Redis(host=self.ip, port=self.port, db=0)
         group_name = "consumer"
         r.xgroup_create("source", group_name, id=0)
+        self.redis = r
 
     def load_model(self):
         if self.model_type == "tf":
@@ -37,15 +42,44 @@ class Driver(object):
                 self.model_helper = json.load(file_2)
             self.model = file_1.read()
 
-
-    # def init_ray(self):
-    #     ray.init(address="",)
-
     def ray_info(self):
         if ray.is_initialized():
             ray.cluster_resource()
         else:
             # throw error
 
-    def init_worker(self):
-        workers = [Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper) for i in range(2)]
+    def add_worker(self):
+        new_worker = Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper)
+        self.workers.append(new_worker)
+        self.workers_ip.append(new_worker.ip())
+
+    def add_workers(self, number):
+        new_workers = [Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper) for _ in range(number)]
+        self.workers.extend(new_workers)
+        self.workers_ip.extend([new_worker.ip() for new_worker in new_workers])
+
+    def delete_worker(self, ip):
+        index = self.workers_ip.index(ip)
+        if index.__eq__(None):
+            print("wrong")
+        else:
+            ray.actor.exit_actor(ray.get(self.workers[index]))
+            self.workers.remove(self.workers[index])
+            self.workers_ip.remove(ip)
+
+    def delete_workers(self,ips):
+        for ip in ips:
+            self.delete_worker(ip)
+
+    # I don't know if the function is needed. I think it's not... So why I put it here and my report= = I don't know...
+    # def reboot_worker(self, ip):
+
+    def run(self):
+        l = len(self.redis.xreadgroup("consumer", "Driver", {"source": '>'}, count=1))
+        if l.__eq__(0):
+            time.sleep(1)
+        else:
+            avg = l/len(self.workers)+1
+            for worker in self.workers:
+                worker.predict(avg)
+
