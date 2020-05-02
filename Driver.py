@@ -40,7 +40,6 @@ class Driver(object):
                 self.model_helper = json.load(file_2)
             self.model = file_1.read()
 
-
     # def ray_info(self):
     #     if ray.is_initialized():
     #         ray.cluster_resource()
@@ -53,7 +52,7 @@ class Driver(object):
         self.workers_ip.append(new_worker.ip.remote())
 
     def add_workers(self, number):
-        new_workers = [Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper) for _ in range(number)]
+        new_workers = [Worker.remote(self.ip, self.port, self.model_type, self.model, self.model_helper) for _ in range(number)]
         self.workers.extend(new_workers)
         self.workers_ip.extend([new_worker.ip.remote() for new_worker in new_workers])
 
@@ -74,11 +73,11 @@ class Driver(object):
     # def reboot_worker(self, ip):
 
     def run(self):
-        l = len(self.redis.xreadgroup("consumer", "Driver", {"source": '>'}, count=1))
-        if l.__eq__(0):
+        length = len(self.redis.xreadgroup("consumer", "Driver", {"source": '0-0'}))
+        if length.__eq__(0):
             time.sleep(1)
         else:
-            avg = l/len(self.workers)+1
+            avg = length / len(self.workers) + 1
             for worker in self.workers:
                 worker.predict.remote(avg)
 

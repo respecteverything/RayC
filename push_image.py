@@ -42,7 +42,7 @@ def enqueue_as_stream(pool, queue, dict):
 @timing
 def dequeue_as_stream(pool, queue):
     r = redis.Redis(connection_pool=pool)
-    return r.xread({queue:b"0-0"})
+    return r.xread({queue: b"0-0"})
 
 
 def test_enqueue(pool, n, source_queue, img):
@@ -61,12 +61,12 @@ if __name__ == "__main__":
     redis_host = sys.argv[1]
     redis_port = int(sys.argv[2])
     mode = sys.argv[3]
-    img_path = "/root/jieru/cat.jpg"
+    img_path = sys.argv[4]
     pool = create_redis_pool(redis_host, redis_port, '0')
     img = cv2.imread(img_path)
     if(mode == 'produce'):
-        source_queue = sys.argv[4]
+        source_queue = sys.argv[5]
         test_enqueue(pool, 100, source_queue, img)
     elif(mode == 'consume'):
-        target_queue = sys.argv[4]
+        target_queue = sys.argv[5]
         test_dequeue(pool, 10, target_queue)
