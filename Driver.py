@@ -17,8 +17,8 @@ class Driver(object):
         self.workers_ip = []
         self.redis = redis.Redis(host=self.ip, port=self.port, db=0)
 
-    def __init__(self,file):
-        file = open(file, 'r')
+    # def __init__(self,file):
+    #     file = open(file, 'r')
 
 
     def init_redis(self):
@@ -36,7 +36,7 @@ class Driver(object):
 
             file_1 = open(model_path, 'rb')
             import json
-            with open(json_path,'r') as file_2:
+            with open(json_path, 'r') as file_2:
                 self.model_helper = json.load(file_2)
             self.model = file_1.read()
 
@@ -69,15 +69,12 @@ class Driver(object):
         for ip in ips:
             self.delete_worker(ip)
 
-    # I don't know if the function is needed. I think it's not... So why I put it here and my report= = I don't know...
-    # def reboot_worker(self, ip):
-
     def run(self):
-        length = len(self.redis.xreadgroup("consumer", "Driver", {"source": '0-0'}))
+        length = self.redis.xlen("source")
         if length.__eq__(0):
             time.sleep(1)
         else:
-            avg = length / len(self.workers) + 1
-            for worker in self.workers:
-                worker.predict.remote(avg)
+            avg = length // len(self.workers) + 1
+            info = ray.get([worker.predict.remote(avg) for worker in self.workers])
+            print(info)
 
