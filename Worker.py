@@ -2,8 +2,7 @@ import ray
 import redis
 import numpy as np
 import time
-import PreProcessing
-import PostProcessing
+
 
 
 @ray.remote(resources={"worker": 1})
@@ -14,6 +13,8 @@ class Worker(object):
         self.model_type = model_type
         self.sess = self.load_model_tf()
         self.helper = model_helper
+        self.pre = Processing()
+
 
     def ip(self):
         return ray.services.get_node_ip_address()
@@ -25,7 +26,7 @@ class Worker(object):
         time_stamp = []
         for i in range(len(info[0][1])):
             size = self.get_model_input_size()
-            im = PreProcessing.resize(np.frombuffer(info[0][1][i][1][b'img'], dtype=np.float32), size)
+            im = Processing.resize(np.frombuffer(info[0][1][i][1][b'img'], dtype=np.float32), size)
             img.append(im)
             time_stamp.append(info[0][1][i][0].decode())
         return img, time_stamp
@@ -63,3 +64,12 @@ class Worker(object):
             size = tuple(input.shape.as_list())
             return size
 
+class Processing(object):
+    def __init__(self):
+        self.status = True
+
+    def resize(img, size):
+        # img
+        img = img.copy()
+        temp = img.resize(size)
+        return img
