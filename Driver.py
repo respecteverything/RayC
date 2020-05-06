@@ -5,6 +5,7 @@ import ray
 from Worker import Worker
 import time
 
+
 class Driver(object):
     def __init__(self, ip, port, model_type, model_path):
         self.ip = ip
@@ -16,10 +17,6 @@ class Driver(object):
         self.workers = []
         self.workers_ip = []
         self.redis = redis.Redis(host=self.ip, port=self.port, db=0)
-
-    # def __init__(self,file):
-    #     file = open(file, 'r')
-
 
     def init_redis(self):
         group_name = "consumer"
@@ -34,17 +31,28 @@ class Driver(object):
                     if ".json" in file:
                         json_path = maindir + file
 
-            file_1 = open(model_path, 'rb')
+            file = open(model_path, 'rb')
             import json
             with open(json_path, 'r') as file_2:
                 self.model_helper = json.load(file_2)
-            self.model = file_1.read()
-
-    # def ray_info(self):
-    #     if ray.is_initialized():
-    #         ray.cluster_resource()
-    #     else:
-    #         # throw error
+            self.model = file.read()
+        elif self.model_type == "torch":
+            for maindir, subdir, mainfiles in os.walk(self.model_path):
+                for file in mainfiles:
+                    if ".pt" in file:
+                        model_path = maindir + "/" + file
+                file = open(model_path, 'rb')
+                self.model = file.read()
+        elif self.model_type == "bigdl":
+            for maindir, subdir, mainfiles in os.walk(self.model_path):
+                for file in mainfiles:
+                    if ".model" in file:
+                        model_path = maindir + "/" + file
+                file = open(model_path, 'rb')
+                self.model = file.read()
+        else:
+            print("Currently Not support " + self.model_type)
+            print("Please check on the file page.")
 
     def add_worker(self):
         new_worker = Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper)

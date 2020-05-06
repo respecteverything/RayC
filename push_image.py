@@ -50,6 +50,7 @@ def test_enqueue(pool, n, source_queue, img):
         dict = {"id":i, "img":img.tobytes()}
         enqueue_as_stream(pool, source_queue, dict)
 
+
 def test_dequeue(pool, n, target_queue):
     for i in range(10):
         result = dequeue(pool, target_queue)
@@ -64,11 +65,9 @@ if __name__ == "__main__":
     img_path = sys.argv[4]
     pool = create_redis_pool(redis_host, redis_port, '0')
     img = cv2.imread(img_path)
-    img = img.copy()
-    img.resize(224, 224, 3)
-    if(mode == 'produce'):
+    if mode == 'produce':
         source_queue = sys.argv[5]
         test_enqueue(pool, 100, source_queue, img)
-    elif(mode == 'consume'):
+    elif mode == 'consume':
         target_queue = sys.argv[5]
         test_dequeue(pool, 10, target_queue)
