@@ -10,21 +10,27 @@ class Worker(object):
         self.r = redis.Redis(host=redis_host, port=redis_port, db=0)
         self.model = model
         self.model_type = model_type
-        self.sess = self.load_model()
+        try:
+            self.sess = self.load_model()
+        except ray.exceptions.RayWorkerError():
+            print("Can not init worker.")
         self.helper = model_helper
 
     def ip(self):
         return ray.services.get_node_ip_address()
 
     def get_content(self, count=1):
-        # add some log info here. Calculate time or something
+        ray.logger.info("Getting contents now....")
         info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '>'}, count=count)
         img = []
         time_stamp = []
+        ids = []
+        ray.logger.info("The length of contents is " + str(info[0][1]))
         for i in range(len(info[0][1])):
             img.append(np.frombuffer(info[0][1][i][1][b'img'], dtype=np.float32))
             time_stamp.append(info[0][1][i][0].decode())
-        return img, time_stamp
+            ids.append(info[0][1][i][1][b'id'].decode())
+        return img, time_stamp, id
 
     def load_model_tf(self):
         import tensorflow as tf
@@ -37,7 +43,7 @@ class Worker(object):
         return sess
 
     def load_model_pytorch(self):
-        fp = open("torch_model.pt",'w')
+        fp = open("torch_model.pt", 'wb')
         fp.write(self.model)
         fp.close()
 
@@ -47,7 +53,7 @@ class Worker(object):
         return model
 
     def load_model_bigdl(self):
-        fp = open("bigdl_model.model", 'w')
+        fp = open("bigdl_model.model", 'wb')
         fp.write(self.model)
         fp.close()
 
@@ -64,59 +70,54 @@ class Worker(object):
         elif self.model_type == 'bigdl':
             return self.load_model_bigdl()
         else:
-            # need some warning
-            return None
+            raise ray.exceptions.RayWorkerError("Not support this kind of model.")
 
-# considering adding some sort of arg:batch_size?
     def predict(self, count=1):
-        img, timestamp = self.get_content(count)
-        img, timestamp = self.pre_processing()
+        img, timestamp, ids = self.get_content(count)
+        img, timestamp = self.pre_processing(img, timestamp)
         if self.model_type == 'tf':
             start = time.time()
             input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])
             op = self.sess.graph.get_tensor_by_name(self.helper['output_names'][0])
-            for i in range(len(img)):
-                res = self.sess.run(op, feed_dict={input: img[i]})
-                self.r.sadd(timestamp[i], np.argmax(res))
-                self.r.xack("source", "consumer", timestamp[i])
+            res = self.sess.run(op, feed_dict={input: img})
             end = time.time()
         elif self.model_type == 'torch':
             start = time.time()
-            for i in range(len(img)):
-                res = self.sess(img[i])
-                self.r.sadd(timestamp[i], np.argmax(res))
-                self.r.xack("source", "consumer", timestamp[i])
+            res = self.sess(img)
+            res = res.detach()
             end = time.time()
         elif self.model_type == 'bigdl':
             start = time.time()
-            for i in range(len(img)):
-                res = self.sess.predict(img[i])
-                self.r.sadd(timestamp[i], np.argmax(res))
-                self.r.xack("source", "consumer", timestamp[i])
+            res = self.sess.predict(img)
             end = time.time()
         else:
-            print("You need to define some functions by yourself.")
-            print("You can check ... for more details.")
-            return "!!!!!!!!!!!!!!!!!!"
+            raise ray.exceptions.RayWorkerError("Not support this kind of model.")
 
+        throughput_1 = str(len(img) / (end - start))
+        for i in range(len(img)):
+            self.r.sadd(ids[i], int(np.argmax(res)))
+            self.r.xack("source", "consumer", timestamp[i])
+            self.r.xdel("source", timestamp[i])
+        end = time.time()
         self.post_processing()
-        result = "Processing " + str(len(img)) + " images. "
-        throughput = "Throughput is " + str(len(img)/(end-start))
-        return result + throughput
+        ray.logger.info("Processing " + str(len(img)) + " images.")
+        throughput_2 = str(len(img) / (end - start))
+        ray.logger.info("Throughput 1 is " + str(throughput_1) + ".")
+        ray.logger.info("Throughput 2 is " + str(throughput_2) + ".")
+        return [throughput_1, throughput_2]
 
     def get_model_input_size(self):
         if self.model_type == "tf":
             input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])
-            size = tuple(input.shape.as_list())
+            size = input.shape.as_list()
         elif self.model_type == 'torch':
             # print("PyTorch models does't require to resize.") set 3 dims
-            size = (3, 224, 224)
+            size = [None, 3, 224, 224]
         elif self.model_type == 'bigdl':
             # print("Bigdl models does't require to resize.") set 3 dims
-            size = (3, 224, 224)
+            size = [None, 3, 224, 224]
         else:
-            print("Not support this kind of type. Please check or rewrite the functions.")
-            #throw error
+            raise ray.exceptions.RayWorkerError("Not support this kind of type. Please check or rewrite the functions.")
         return size
 
     def pre_processing(self, img, stamp):
@@ -130,10 +131,15 @@ class Worker(object):
         print("here is post_processing.")
 
     def resize(self, img, size):
-        # img
-        img = img.copy()
-        temp = img.resize(size)
-        return img
+        size[0] = len(img)
+        if self.model_type == 'tf':
+            size[1] = 1
+        print(size)
+        image = np.array(img)
+        image = image.copy()
+        temp = image.resize(tuple(size))
+        print(image.shape)
+        return image
 
     def z_score_normalizing(self, img):
         mean = sum(img) / len(img)  # 先求均值

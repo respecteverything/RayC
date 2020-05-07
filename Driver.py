@@ -41,21 +41,22 @@ class Driver(object):
                 for file in mainfiles:
                     if ".pt" in file:
                         model_path = maindir + "/" + file
-                file = open(model_path, 'rb')
+                file = open(model_path, 'r')
                 self.model = file.read()
         elif self.model_type == "bigdl":
             for maindir, subdir, mainfiles in os.walk(self.model_path):
                 for file in mainfiles:
                     if ".model" in file:
                         model_path = maindir + "/" + file
-                file = open(model_path, 'rb')
+                file = open(model_path, 'r')
                 self.model = file.read()
         else:
-            print("Currently Not support " + self.model_type)
-            print("Please check on the file page.")
+            print("If you want to use customer model, please rewrite some functions.")
+            print("More detail please check the github page.")
+            raise ValueError("Currently Not support " + self.model_type)
 
     def add_worker(self):
-        new_worker = Worker.remote(self.ip, self.port,self.model_type, self.model, self.model_helper)
+        new_worker = Worker.remote(self.ip, self.port, self.model_type, self.model, self.model_helper)
         self.workers.append(new_worker)
         self.workers_ip.append(new_worker.ip.remote())
 
@@ -67,22 +68,27 @@ class Driver(object):
     def delete_worker(self, ip):
         index = self.workers_ip.index(ip)
         if index.__eq__(None):
-            print("wrong")
+            ray.logger.warning("The Worker:" + str(ip) + " is not exist.")
         else:
             ray.actor.exit_actor(ray.get(self.workers[index]))
             self.workers.remove(self.workers[index])
             self.workers_ip.remove(ip)
+            ray.logger.info("Delete Worker:" + ip + " success.")
 
     def delete_workers(self, ips):
         for ip in ips:
             self.delete_worker(ip)
 
-    def run(self):
+    def run(self, batch=256):
         length = self.redis.xlen("source")
         if length.__eq__(0):
             time.sleep(1)
         else:
-            avg = length // len(self.workers) + 1
-            info = ray.get([worker.predict.remote(avg) for worker in self.workers])
-            print(info)
+            if length // len(self.workers) < batch:
+                avg = length // len(self.workers) + 1
+                info = ray.get([worker.predict.remote(avg) for worker in self.workers])
+                print(info)
+            else:
+                info = ray.get([worker.predict.remote(batch) for worker in self.workers])
+                print(info)
 
