@@ -14,6 +14,8 @@ class Worker(object):
             self.sess = self.load_model()
         except ray.exceptions.RayWorkerError():
             print("Can not init worker.")
+        except BaseException as e:
+            print(e)
         self.helper = model_helper
 
     def ip(self):
@@ -21,16 +23,16 @@ class Worker(object):
 
     def get_content(self, count=1):
         ray.logger.info("Getting contents now....")
-        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '>'}, count=count)
+        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '0-0'}, count=count)
         img = []
         time_stamp = []
         ids = []
-        ray.logger.info("The length of contents is " + str(info[0][1]))
+        ray.logger.info("The length of contents is " + str(len(info[0][1])))
         for i in range(len(info[0][1])):
             img.append(np.frombuffer(info[0][1][i][1][b'img'], dtype=np.float32))
             time_stamp.append(info[0][1][i][0].decode())
             ids.append(info[0][1][i][1][b'id'].decode())
-        return img, time_stamp, id
+        return img, time_stamp, ids
 
     def load_model_tf(self):
         import tensorflow as tf
@@ -48,6 +50,9 @@ class Worker(object):
         fp.close()
 
         import torch
+        import psutil
+        cores = psutil.cpu_count()
+        torch.set_num_threads(cores)
         model = torch.jit.load("torch_model.pt")
         model.eval()
         return model
@@ -59,7 +64,7 @@ class Worker(object):
 
         from zoo.pipeline.inference import InferenceModel
         model = InferenceModel()
-        model = InferenceModel.load_bigdl("bigdl_model.model")
+        model.load_bigdl("bigdl_model.model")
         return model
 
     def load_model(self):
@@ -73,21 +78,19 @@ class Worker(object):
             raise ray.exceptions.RayWorkerError("Not support this kind of model.")
 
     def predict(self, count=1):
+        start = time.time()
         img, timestamp, ids = self.get_content(count)
         img, timestamp = self.pre_processing(img, timestamp)
         if self.model_type == 'tf':
-            start = time.time()
             input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])
             op = self.sess.graph.get_tensor_by_name(self.helper['output_names'][0])
             res = self.sess.run(op, feed_dict={input: img})
             end = time.time()
         elif self.model_type == 'torch':
-            start = time.time()
             res = self.sess(img)
             res = res.detach()
             end = time.time()
         elif self.model_type == 'bigdl':
-            start = time.time()
             res = self.sess.predict(img)
             end = time.time()
         else:
@@ -124,6 +127,7 @@ class Worker(object):
         new_img_size = self.get_model_input_size()
         new_img = self.resize(img, new_img_size)
         if self.model_type == 'torch':
+            import torch
             new_img = torch.from_numpy(new_img)
         return new_img, stamp
 
@@ -132,13 +136,9 @@ class Worker(object):
 
     def resize(self, img, size):
         size[0] = len(img)
-        if self.model_type == 'tf':
-            size[1] = 1
-        print(size)
         image = np.array(img)
         image = image.copy()
         temp = image.resize(tuple(size))
-        print(image.shape)
         return image
 
     def z_score_normalizing(self, img):

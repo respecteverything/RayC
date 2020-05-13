@@ -41,14 +41,14 @@ class Driver(object):
                 for file in mainfiles:
                     if ".pt" in file:
                         model_path = maindir + "/" + file
-                file = open(model_path, 'r')
+                file = open(model_path, 'rb')
                 self.model = file.read()
         elif self.model_type == "bigdl":
             for maindir, subdir, mainfiles in os.walk(self.model_path):
                 for file in mainfiles:
                     if ".model" in file:
                         model_path = maindir + "/" + file
-                file = open(model_path, 'r')
+                file = open(model_path, 'rb')
                 self.model = file.read()
         else:
             print("If you want to use customer model, please rewrite some functions.")

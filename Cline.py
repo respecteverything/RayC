@@ -22,40 +22,21 @@ def create_redis_pool(host, port, db):
 
 
 @timing
-def enqueue(pool, queue, payload):
-    r = redis.Redis(connection_pool=pool)
-    r.rpush(queue, payload)
-
-
-@timing
 def dequeue(pool, queue):
     r = redis.Redis(connection_pool=pool)
     return r.lpop(queue)
 
 
-@timing
-def enqueue_as_stream(pool, queue, dict):
+def test_enqueue(pool, n, queue, img):
     r = redis.Redis(connection_pool=pool)
-    r.xadd(queue, dict)
-
-
-@timing
-def dequeue_as_stream(pool, queue):
-    r = redis.Redis(connection_pool=pool)
-    return r.xread({queue: b"0-0"})
-
-
-def test_enqueue(pool, n, source_queue, img):
+    nowtime = []
     for i in range(n):
-        nowTime = lambda: int(round(time.time() * 1000)) # use ms as time stamp
-        dict = {"id": nowTime, "img": img.tobytes()}
-        enqueue_as_stream(pool, source_queue, dict)
-
-
-def test_dequeue(pool, n, target_queue):
-    for i in range(10):
-        result = dequeue(pool, target_queue)
-        print(result)
+        # use ms as time stamp
+        nowtime.append(int(round(time.time() * 1000)))
+        # dict = {"id": nowTime, "img": img[i].tobytes()}
+        dict = {"id": nowtime, "img": img.tobytes()}
+        r.xadd(queue, dict)
+    return nowtime
 
 
 if __name__ == "__main__":
