@@ -23,7 +23,7 @@ class Worker(object):
 
     def get_content(self, count=1):
         ray.logger.info("Getting contents now....")
-        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '0-0'}, count=count)
+        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '>'}, count=count)
         img = []
         time_stamp = []
         ids = []
