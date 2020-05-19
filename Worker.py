@@ -22,6 +22,7 @@ class Worker(object):
         self.source_name = source_name
         self.batch = batch_size
         self.input_size = input_size
+        self.group_name = group_name
 
         while True:
             self.inference()
@@ -87,7 +88,8 @@ class Worker(object):
 
     def source(self):
         ray.logger.info("Getting contents now....")
-        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {self.source_name: '>'}, block=10, count=self.batch)
+        info = self.r.xreadgroup(self.group_name, ray.services.get_node_ip_address(),
+                                 {self.source_name: '>'}, block=10, count=self.batch)
         imgs = []
         time_stamps = []
         uris = []
