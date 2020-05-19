@@ -9,10 +9,15 @@ if __name__ == "__main__":
     model = sys.argv[3]
     ray_head = sys.argv[4]
     model_type = sys.argv[5]
+    input_size = sys.argv[6]
+    tf_input = None
+    tf_output = None
+    if model_type == 'tf':
+        tf_input = sys.argv[7]
+        tf_output = sys.argv[8]
     ray.init(address=ray_head)
-    driver = Driver(redis_host, redis_port, model_type, model)
-    driver.init_redis()
+    driver = Driver(redis_host, redis_port, model_type, model,
+                    input_size=input_size, tf_input=tf_input, tf_output=tf_output)
     driver.load_model()
-    driver.add_workers(2)
-    while True:
-        driver.run()
+    driver.add_worker()
+

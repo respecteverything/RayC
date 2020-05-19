@@ -6,7 +6,9 @@ import time
 
 @ray.remote(resources={"worker": 1})
 class Worker(object):
-    def __init__(self, redis_host, redis_port, model_type, model, model_helper, source_name="image_stream"):
+    def __init__(self, redis_host, redis_port, model_type, model, tf_helper,
+                 source_name="image_stream", group_name="consumer",
+                 batch_size=64, input_size=(224, 224, 3)):
         self.r = redis.Redis(host=redis_host, port=redis_port, db=0)
         self.model = model
         self.model_type = model_type
@@ -16,24 +18,16 @@ class Worker(object):
             print("Can not init worker.")
         except BaseException as e:
             print(e)
-        self.helper = model_helper
+        self.tf_helper = tf_helper
         self.source_name = source_name
+        self.batch = batch_size
+        self.input_size = input_size
+
+        while True:
+            self.inference()
 
     def ip(self):
         return ray.services.get_node_ip_address()
-
-    def get_content(self, count=1):
-        ray.logger.info("Getting contents now....")
-        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {self.source_name: '>'}, count=count)
-        img = []
-        time_stamp = []
-        ids = []
-        ray.logger.info("The length of contents is " + str(len(info[0][1])))
-        for i in range(len(info[0][1])):
-            img.append(np.frombuffer(info[0][1][i][1][b'image'], dtype=np.float32))
-            time_stamp.append(info[0][1][i][0].decode())
-            ids.append(info[0][1][i][1][b'uri'].decode())
-        return img, time_stamp, ids
 
     def load_model_tf(self):
         import tensorflow as tf
@@ -78,71 +72,71 @@ class Worker(object):
         else:
             raise ray.exceptions.RayWorkerError("Not support this kind of model.")
 
-    def predict(self, count=1):
+    def inference(self):
         start = time.time()
-        img, timestamp, ids = self.get_content(count)
-        img, timestamp = self.pre_processing(img, timestamp)
+        imgs, time_stamps, uris = self.source()
+        e1 = time.time()
+        results = self.predict(imgs)
+        e2 = time.time()
+        self.sink(time_stamps, uris, results)
+        e3 = time.time()
+
+        ray.logger.info("Loading images time: " + str(e1-start) + ". Predict time: "
+                        + str(e2-e1) + ". Sink time: " + str(e3-e2))
+        ray.logger.info("Process " + str(len(imgs)) + " images. Throughput: " + str((e3-start)/len(imgs)))
+
+    def source(self):
+        ray.logger.info("Getting contents now....")
+        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {self.source_name: '>'}, block=10, count=self.batch)
+        imgs = []
+        time_stamps = []
+        uris = []
+        ray.logger.info("The length of contents is " + str(len(info[0][1])))
+        for i in range(len(info[0][1])):
+            imgs.append(np.frombuffer(info[0][1][i][1][b'image'], dtype=np.float32))
+            time_stamps.append(info[0][1][i][0].decode())
+            uris.append(info[0][1][i][1][b'uri'].decode())
+        return imgs, time_stamps, uris
+
+    def predict(self, imgs):
         if self.model_type == 'tf':
-            input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])
-            op = self.sess.graph.get_tensor_by_name(self.helper['output_names'][0])
-            res = self.sess.run(op, feed_dict={input: img})
-            end = time.time()
+            input = self.sess.graph.get_tensor_by_name(self.tf_helper[0])
+            op = self.sess.graph.get_tensor_by_name(self.tf_helper[1])
+            res = self.sess.run(op, feed_dict={input: imgs})
         elif self.model_type == 'torch':
-            res = self.sess(img)
+            res = self.sess(imgs)
             res = res.detach()
-            end = time.time()
         elif self.model_type == 'bigdl':
-            res = self.sess.predict(img)
-            end = time.time()
+            res = self.sess.predict(imgs)
         else:
             raise ray.exceptions.RayWorkerError("Not support this kind of model.")
 
-        throughput_1 = str(len(img) / (end - start))
-        for i in range(len(img)):
-            key = "result:"+str(ids[i])
-            #result = {"value":int(np.argmax(res)
-            self.r.hset(key, "value", int(np.argmax(res)))
-            self.r.xack(self.source_name, "consumer", timestamp[i])
-            self.r.xdel(self.source_name, timestamp[i])
-        end = time.time()
-        self.post_processing()
-        ray.logger.info("Processing " + str(len(img)) + " images.")
-        throughput_2 = str(len(img) / (end - start))
-        ray.logger.info("Throughput 1 is " + str(throughput_1) + ".")
-        ray.logger.info("Throughput 2 is " + str(throughput_2) + ".")
-        return [throughput_1, throughput_2]
+        results = res.tolist()
+        return results
 
+    def sink(self, time_stamps, uris, results):
+        p = self.r.pipeline(transaction=False)
+        for time_stamp, uri, result in time_stamps, uris, results:
+            key = "result:" + str(uri)
+            p.hset(key, "value", np.argmax(result)).xdel(self.source_name, time_stamp)
 
-    def get_model_input_size(self):
-        if self.model_type == "tf":
-            input = self.sess.graph.get_tensor_by_name(self.helper['input_names'][0])
-            size = input.shape.as_list()
-        elif self.model_type == 'torch':
-            # print("PyTorch models does't require to resize.") set 3 dims
-            size = [None, 3, 224, 224]
-        elif self.model_type == 'bigdl':
-            # print("Bigdl models does't require to resize.") set 3 dims
-            size = [None, 3, 224, 224]
-        else:
-            raise ray.exceptions.RayWorkerError("Not support this kind of type. Please check or rewrite the functions.")
-        return size
+        p.execute()
 
-    def pre_processing(self, img, stamp):
-        new_img_size = self.get_model_input_size()
-        new_img = self.resize(img, new_img_size)
+    def pre_processing(self, img):
+        new_img = self.resize(img)
         if self.model_type == 'torch':
             import torch
             new_img = torch.from_numpy(new_img)
-        return new_img, stamp
+        return new_img
 
     def post_processing(self):
         print("here is post_processing.")
 
-    def resize(self, img, size):
-        size[0] = len(img)
+    def resize(self, img):
+        size = (len(img)) + self.input_size
         image = np.array(img)
         image = image.copy()
-        temp = image.resize(tuple(size))
+        image.resize(size)
         return image
 
     def z_score_normalizing(self, img):

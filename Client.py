@@ -4,28 +4,31 @@ import redis
 import cv2
 
 
-def create_redis_pool(host, port, db):
-    pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
-    return pool
+class InputQueue(object):
+    def __init__(self, redis_ip="localhost", redis_port=6379,
+                 queue_name="image_stream", input_size=(224, 224, 3)):
+        self.r = redis.Redis(host=self.ip, port=self.port, db=0)
+        self.queue_name = queue_name
+        self.input_size = input_size
+
+    def enqueue_image(self, uri, img):
+        import cv2
+        new = cv2.resize(img, self.input_size, interpolation=cv2.INTER_CUBIC)
+        dict = {"uri": uri, "image": new.tobytes()}
+        self.r.xadd(self.queue_name, dict)
 
 
-def dequeue(pool, queue):
-    r = redis.Redis(connection_pool=pool)
-    return r.lpop(queue)
+class OutputQueue(object):
+    def __init__(self, redis_ip="localhost", redis_port=6379, queue_name="image_stream"):
+        self.r = redis.Redis(host=self.ip, port=self.port, db=0)
+        self.queue_name = queue_name
 
+    def dequeue(self, uri):
+        key = "result:"+uri
+        return self.r.hget(key)
 
-def enqueue(pool, n, queue,uri, img):
-    r = redis.Redis(connection_pool=pool)
-    timestamp = []
-    for i in range(n):
-        # use ms as time stamp
-        # nowtime = int(round(time.time() * 1000))
-        # timestamp.append(nowtime)
-        # dict = {"id": nowTime, "img": img[i].tobytes()}
-        # dict = {"id": nowtime, "img": img.tobytes()}
-        dict = {"uri": uri, "image": img.tobytes()}
-        r.xadd(queue, dict)
-    return timestamp
+    def dequeue_stream(self):
+        return self.r.hgetall("result:*")
 
 
 if __name__ == "__main__":
@@ -34,11 +37,14 @@ if __name__ == "__main__":
     redis_port = int(sys.argv[2])
     source_queue = sys.argv[3]
     img_path = sys.argv[4]
-    pool = create_redis_pool(redis_host, redis_port, '0')
+
     img = cv2.imread(img_path)
-    img.copy()
-    img.resize(224, 224, 3)
-    uri = "xxxx"
-    timestamp = enqueue(pool, 100, source_queue, uri, img)
+
+
+    input = InputQueue()
+    for i in range(1000):
+        nowtime = int(round(time.time() * 1000))
+        input.enqueue_image(nowtime, img)
+
 
 
