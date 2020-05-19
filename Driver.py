@@ -7,7 +7,7 @@ import time
 
 
 class Driver(object):
-    def __init__(self, ip, port, model_type, model_path):
+    def __init__(self, ip, port, model_type, model_path, source_name="image_stream"):
         self.ip = ip
         self.port = port
         self.model_type = model_type
@@ -16,11 +16,12 @@ class Driver(object):
         self.model_helper = None
         self.workers = []
         self.workers_ip = []
+        self.source_name = source_name
         self.redis = redis.Redis(host=self.ip, port=self.port, db=0)
 
     def init_redis(self):
         group_name = "consumer"
-        self.redis.xgroup_create("source", group_name, id=0, mkstream=True)
+        self.redis.xgroup_create(self.source_name, group_name, id=0, mkstream=True)
 
     def load_model(self):
         if self.model_type == "tf":
@@ -56,12 +57,12 @@ class Driver(object):
             raise ValueError("Currently Not support " + self.model_type)
 
     def add_worker(self):
-        new_worker = Worker.remote(self.ip, self.port, self.model_type, self.model, self.model_helper)
+        new_worker = Worker.remote(self.ip, self.port, self.model_type, self.model, self.model_helper, self.source_name)
         self.workers.append(new_worker)
         self.workers_ip.append(new_worker.ip.remote())
 
     def add_workers(self, number):
-        new_workers = [Worker.remote(self.ip, self.port, self.model_type, self.model, self.model_helper) for _ in range(number)]
+        new_workers = [Worker.remote(self.ip, self.port, self.model_type, self.model, self.model_helper, self.source_name) for _ in range(number)]
         self.workers.extend(new_workers)
         self.workers_ip.extend([new_worker.ip.remote() for new_worker in new_workers])
 
@@ -79,8 +80,8 @@ class Driver(object):
         for ip in ips:
             self.delete_worker(ip)
 
-    def run(self, batch=256):
-        length = self.redis.xlen("source")
+    def run(self, batch=64):
+        length = self.redis.xlen(self.source_name)
         if length.__eq__(0):
             time.sleep(1)
         else:
@@ -91,4 +92,3 @@ class Driver(object):
             else:
                 info = ray.get([worker.predict.remote(batch) for worker in self.workers])
                 print(info)
-

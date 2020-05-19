@@ -14,15 +14,16 @@ def dequeue(pool, queue):
     return r.lpop(queue)
 
 
-def enqueue(pool, n, queue, img):
+def enqueue(pool, n, queue,uri, img):
     r = redis.Redis(connection_pool=pool)
     timestamp = []
     for i in range(n):
         # use ms as time stamp
-        nowtime = int(round(time.time() * 1000))
-        timestamp.append(nowtime)
+        # nowtime = int(round(time.time() * 1000))
+        # timestamp.append(nowtime)
         # dict = {"id": nowTime, "img": img[i].tobytes()}
-        dict = {"id": nowtime, "img": img.tobytes()}
+        # dict = {"id": nowtime, "img": img.tobytes()}
+        dict = {"uri": uri, "image": img.tobytes()}
         r.xadd(queue, dict)
     return timestamp
 
@@ -37,7 +38,7 @@ if __name__ == "__main__":
     img = cv2.imread(img_path)
     img.copy()
     img.resize(224, 224, 3)
-
-    timestamp = enqueue(pool, 100, source_queue, img)
+    uri = "xxxx"
+    timestamp = enqueue(pool, 100, source_queue, uri, img)
 
 

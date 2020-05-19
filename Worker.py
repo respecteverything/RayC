@@ -6,7 +6,7 @@ import time
 
 @ray.remote(resources={"worker": 1})
 class Worker(object):
-    def __init__(self, redis_host, redis_port, model_type, model, model_helper):
+    def __init__(self, redis_host, redis_port, model_type, model, model_helper, source_name="image_stream"):
         self.r = redis.Redis(host=redis_host, port=redis_port, db=0)
         self.model = model
         self.model_type = model_type
@@ -17,21 +17,22 @@ class Worker(object):
         except BaseException as e:
             print(e)
         self.helper = model_helper
+        self.source_name = source_name
 
     def ip(self):
         return ray.services.get_node_ip_address()
 
     def get_content(self, count=1):
         ray.logger.info("Getting contents now....")
-        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {"source": '>'}, count=count)
+        info = self.r.xreadgroup("consumer", ray.services.get_node_ip_address(), {self.source_name: '>'}, count=count)
         img = []
         time_stamp = []
         ids = []
         ray.logger.info("The length of contents is " + str(len(info[0][1])))
         for i in range(len(info[0][1])):
-            img.append(np.frombuffer(info[0][1][i][1][b'img'], dtype=np.float32))
+            img.append(np.frombuffer(info[0][1][i][1][b'image'], dtype=np.float32))
             time_stamp.append(info[0][1][i][0].decode())
-            ids.append(info[0][1][i][1][b'id'].decode())
+            ids.append(info[0][1][i][1][b'uri'].decode())
         return img, time_stamp, ids
 
     def load_model_tf(self):
@@ -98,9 +99,11 @@ class Worker(object):
 
         throughput_1 = str(len(img) / (end - start))
         for i in range(len(img)):
-            self.r.sadd(ids[i], int(np.argmax(res)))
-            self.r.xack("source", "consumer", timestamp[i])
-            self.r.xdel("source", timestamp[i])
+            key = "result:"+str(ids[i])
+            #result = {"value":int(np.argmax(res)
+            self.r.hset(key, "value", int(np.argmax(res)))
+            self.r.xack(self.source_name, "consumer", timestamp[i])
+            self.r.xdel(self.source_name, timestamp[i])
         end = time.time()
         self.post_processing()
         ray.logger.info("Processing " + str(len(img)) + " images.")
@@ -108,6 +111,7 @@ class Worker(object):
         ray.logger.info("Throughput 1 is " + str(throughput_1) + ".")
         ray.logger.info("Throughput 2 is " + str(throughput_2) + ".")
         return [throughput_1, throughput_2]
+
 
     def get_model_input_size(self):
         if self.model_type == "tf":
