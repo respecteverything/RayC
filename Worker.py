@@ -47,8 +47,8 @@ class Worker(object):
 
         import torch
         import psutil
-        cores = psutil.cpu_count()
-        torch.set_num_threads(cores)
+        #cores = psutil.cpu_count()
+        #torch.set_num_threads(cores)
         model = torch.jit.load("torch_model.pt")
         model.eval()
         return model
@@ -106,8 +106,9 @@ class Worker(object):
             op = self.sess.graph.get_tensor_by_name(self.tf_helper[1])
             res = self.sess.run(op, feed_dict={input: imgs})
         elif self.model_type == 'torch':
-            res = self.sess(imgs)
-            res = res.detach()
+            import torch
+            with torch.no_grad():
+                res = self.sess(imgs)
         elif self.model_type == 'bigdl':
             res = self.sess.predict(imgs)
         else:

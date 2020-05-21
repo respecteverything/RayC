@@ -19,7 +19,7 @@ class Driver(object):
         self.workers_ip = []
         self.source_name = source_name
         self.group_name = group_name
-        # self.redis = redis.Redis(host=self.ip, port=self.port, db=0)
+        self.redis = redis.Redis(host=self.redis_ipip, port=self.redis_portport, db=0)
         self.input_size = input_size
         self.batch = batch_size
         self.tf_helper = [tf_input, tf_output]
@@ -63,13 +63,15 @@ class Driver(object):
 
     def add_worker(self):
         new_worker = Worker.remote(self.redis_ip, self.redis_port, self.model_type, self.model,
-                                   self.tf_helper, self.source_name, self.group_name, self.batch)
+                                   self.tf_helper, self.source_name, self.group_name, self.batch,
+                                   self.input_size)
         self.workers.append(new_worker)
         self.workers_ip.append(new_worker.ip.remote())
 
     def add_workers(self, number):
         new_workers = [Worker.remote(self.redis_ip, self.redis_port, self.model_type, self.model,
-                                     self.tf_helper, self.source_name, self.group_name, self.batch) for _ in range(number)]
+                                     self.tf_helper, self.source_name, self.group_name, self.batch,
+                                     self.input_size) for _ in range(number)]
         self.workers.extend(new_workers)
         self.workers_ip.extend([new_worker.ip.remote() for new_worker in new_workers])
 
@@ -86,5 +88,8 @@ class Driver(object):
     def delete_workers(self, ips):
         for ip in ips:
             self.delete_worker(ip)
+
+    def info(self):
+        ray.logging.INFO
 
 
