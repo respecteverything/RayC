@@ -74,8 +74,8 @@ class Worker(object):
             raise ray.exceptions.RayWorkerError("Not support this kind of model.")
 
     def inference(self):
-        start = time.time()
-        imgs, time_stamps, uris = self.source()
+        #start = time.time()
+        imgs, time_stamps, uris, start = self.source()
         e1 = time.time()
         results = self.predict(imgs)
         e2 = time.time()
@@ -89,7 +89,8 @@ class Worker(object):
     def source(self):
         ray.logger.info("Getting contents now....")
         info = self.r.xreadgroup(self.group_name, ray.services.get_node_ip_address(),
-                                 {self.source_name: '>'}, block=10, count=self.batch)
+                                 {self.source_name: '>'}, block=0, count=self.batch)
+        start = time.time()
         imgs = []
         time_stamps = []
         uris = []
@@ -98,7 +99,7 @@ class Worker(object):
             imgs.append(np.frombuffer(info[0][1][i][1][b'image'], dtype=np.float32))
             time_stamps.append(info[0][1][i][0].decode())
             uris.append(info[0][1][i][1][b'uri'].decode())
-        return imgs, time_stamps, uris
+        return imgs, time_stamps, uris, start
 
     def predict(self, imgs):
         if self.model_type == 'tf':
@@ -136,10 +137,11 @@ class Worker(object):
         print("here is post_processing.")
 
     def resize(self, img):
-        size = (len(img)) + self.input_size
-        image = np.array(img)
-        image = image.copy()
-        image.resize(size)
+        length = tuple([len(img)])
+        size = length + self.input_size
+        img = np.array(img)
+        img = img.astype(np.float32)
+        image = img.reshape(size)
         return image
 
     def z_score_normalizing(self, img):
