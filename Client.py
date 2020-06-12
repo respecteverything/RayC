@@ -2,7 +2,7 @@ import sys
 import time
 import redis
 import cv2
-
+import argparse
 
 class InputQueue(object):
     def __init__(self, redis_ip="localhost", redis_port=6379,
@@ -21,9 +21,8 @@ class InputQueue(object):
 
 
 class OutputQueue(object):
-    def __init__(self, redis_ip="localhost", redis_port=6379, queue_name="image_stream"):
+    def __init__(self, redis_ip="localhost", redis_port=6379,):
         self.r = redis.Redis(host=redis_ip, port=redis_port, db=0)
-        self.queue_name = queue_name
 
     def dequeue(self, uri):
         key = "result:"+uri
@@ -34,14 +33,25 @@ class OutputQueue(object):
 
 
 if __name__ == "__main__":
-    print(sys.argv)
-    redis_host = sys.argv[1]
-    redis_port = int(sys.argv[2])
-    source_queue = sys.argv[3]
-    img_path = sys.argv[4]
-    img = cv2.imread(img_path)
-    input = InputQueue()
-    for i in range(1000):
-        nowtime = int(round(time.time() * 1000))
-        input.enqueue_image(nowtime, img)
+    parser = argparse.ArgumentParser(description="Cluster-Serving ray setup")
+    parser.add_argument("--redis_host", type=str, default='localhost',
+                        help="Redis Ip.")
+    parser.add_argument("--redis_port", default=6379, type=int,
+                        help="The Redis port.")
+    parser.add_argument("--source_queue", default='image_stream', type=str,
+                        help="The name of source queue")
+    parser.add_argument("--img_path", type=str,
+                        help="The path to your img")
+
+    args = parser.parse_args()
+
+    img = cv2.imread(args.img_path)
+    input = InputQueue(args.redis_host, args.redis_port, args.source_queue)
+
+    nowtime = int(round(time.time() * 1000))
+    input.enqueue_image(str(nowtime), img)
+
+    time.sleep(2)
+    output = OutputQueue(args.redis_host, args.redis_port)
+    print(output.dequeue(str(nowtime)))
 
