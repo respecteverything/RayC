@@ -2,42 +2,56 @@ import sys
 import time
 import redis
 import cv2
+import argparse
+
+class InputQueue(object):
+    def __init__(self, redis_ip="localhost", redis_port=6379,
+                 queue_name="image_stream", input_size=(224, 224)):
+        self.r = redis.Redis(host=redis_ip, port=redis_port, db=0)
+        self.queue_name = queue_name
+        self.input_size = input_size
+
+    def enqueue_image(self, uri, img):
+        import cv2
+        import numpy as np
+        new = cv2.resize(img, self.input_size, interpolation=cv2.INTER_CUBIC)
+        new = new.tostring()
+        dict = {"uri": uri, "image": new}
+        self.r.xadd(self.queue_name, dict)
 
 
-def create_redis_pool(host, port, db):
-    pool = redis.ConnectionPool(host=host, port=port, db=db, decode_responses=True)
-    return pool
+class OutputQueue(object):
+    def __init__(self, redis_ip="localhost", redis_port=6379,):
+        self.r = redis.Redis(host=redis_ip, port=redis_port, db=0)
 
+    def dequeue(self, uri):
+        key = "result:"+uri
+        return self.r.hget(key)
 
-def dequeue(pool, queue):
-    r = redis.Redis(connection_pool=pool)
-    return r.lpop(queue)
-
-
-def enqueue(pool, n, queue, img):
-    r = redis.Redis(connection_pool=pool)
-    timestamp = []
-    for i in range(n):
-        # use ms as time stamp
-        nowtime = int(round(time.time() * 1000))
-        timestamp.append(nowtime)
-        # dict = {"id": nowTime, "img": img[i].tobytes()}
-        dict = {"id": nowtime, "img": img.tobytes()}
-        r.xadd(queue, dict)
-    return timestamp
+    def dequeue_stream(self):
+        return self.r.hgetall("result:*")
 
 
 if __name__ == "__main__":
-    print(sys.argv)
-    redis_host = sys.argv[1]
-    redis_port = int(sys.argv[2])
-    source_queue = sys.argv[3]
-    img_path = sys.argv[4]
-    pool = create_redis_pool(redis_host, redis_port, '0')
-    img = cv2.imread(img_path)
-    img.copy()
-    img.resize(224, 224, 3)
+    parser = argparse.ArgumentParser(description="Cluster-Serving ray setup")
+    parser.add_argument("--redis_host", type=str, default='localhost',
+                        help="Redis Ip.")
+    parser.add_argument("--redis_port", default=6379, type=int,
+                        help="The Redis port.")
+    parser.add_argument("--source_queue", default='image_stream', type=str,
+                        help="The name of source queue")
+    parser.add_argument("--img_path", type=str,
+                        help="The path to your img")
 
-    timestamp = enqueue(pool, 100, source_queue, img)
+    args = parser.parse_args()
 
+    img = cv2.imread(args.img_path)
+    input = InputQueue(args.redis_host, args.redis_port, args.source_queue)
+
+    nowtime = int(round(time.time() * 1000))
+    input.enqueue_image(str(nowtime), img)
+
+    time.sleep(2)
+    output = OutputQueue(args.redis_host, args.redis_port)
+    print(output.dequeue(str(nowtime)))
 
